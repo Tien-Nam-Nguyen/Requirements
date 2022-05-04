@@ -39,4 +39,13 @@ class VideoStream:
 				break	
 		return self.totalframe
 
+	def frame_list(self):
+		'''Return frame list'''
+		return self.frames
 	
+	def fastward(self, pass_frame):
+		'''Fast-forward if pass_frame > 0, rewind if pass_frame < 0'''
+		n = self.frameNum + pass_frame
+		if n >= 1 and n <= self.totalframe:
+			self.frameNum = n
+			return self.frames[n - 1]

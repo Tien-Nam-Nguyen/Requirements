@@ -1,9 +1,11 @@
 from ast import Pass, Str, Try
 from concurrent.futures import thread
+from pickle import READONLY_BUFFER
 from struct import pack
 from time import time
 from tkinter import *
 import tkinter.messagebox
+from tkinter.ttk import Progressbar
 from turtle import left
 from typing_extensions import Self
 from PIL import Image, ImageTk
@@ -18,19 +20,24 @@ class Client:
 	INIT = 0
 	READY = 1
 	PLAYING = 2
-	state = INIT
+	SWITCH = 3
+	state = SWITCH
 	
 	SETUP = 0
 	PLAY = 1
 	PAUSE = 2
 	TEARDOWN = 3
+	DESCRIBE = 4
+	FORWARD = 5
+	BACKWARD = 6
+	CHOOSE = 7
 	
 	LOSS_NUM = 0
 	TOTAL_DATA = 0
 	START_TIME = 0
 	END_TIME = 0
 
-	#PASS_TIME = 5
+	PASS_TIME = 5
 
 	TOTAL_TIME = 0
 	# Initiation..
@@ -48,8 +55,8 @@ class Client:
 		self.teardownAcked = 0
 		self.connectToServer()
 		self.frameNbr = 0
-		
-		
+		self.frame_count = 0
+		self.setupflag = 0
 	# THIS GUI IS JUST FOR REFERENCE ONLY, STUDENTS HAVE TO CREATE THEIR OWN GUI 	
 	def createWidgets(self):
 		"""Build GUI."""
@@ -57,35 +64,66 @@ class Client:
 		self.setup = Button(self.master, width=20, padx=3, pady=3)
 		self.setup["text"] = "Setup"
 		self.setup["command"] = self.setupMovie
-		self.setup.grid(row=4, column=0, padx=2, pady=2)
+		self.setup.grid(row=3, column=2, padx=2, pady=2)
 		
 		# Create Play button		
 		self.start = Button(self.master, width=20, padx=3, pady=3)
 		self.start["text"] = "Play"
 		self.start["command"] = self.playMovie
-		self.start.grid(row=4, column=1, padx=2, pady=2)
+		self.start.grid(row=2, column=2, padx=2, pady=2)
 		
 		# Create Pause button			
 		self.pause = Button(self.master, width=20, padx=3, pady=3)
 		self.pause["text"] = "Pause"
 		self.pause["command"] = self.pauseMovie
-		self.pause.grid(row=4, column=2, padx=2, pady=2)
+		self.pause.grid(row=2, column=3, padx=2, pady=2)
 		
 		# Create Teardown button
 		self.teardown = Button(self.master, width=20, padx=3, pady=3)
 		self.teardown["text"] = "Teardown"
 		self.teardown["command"] =  self.exitClient
-		self.teardown.grid(row=4, column=3, padx=2, pady=2)
+		self.teardown.grid(row=3, column=3, padx=2, pady=2)
 		
+		#	Create Describe button
+		self.describe = Button(self.master, width=20, padx=3, pady=3)
+		self.describe['text'] = 'Describe'
+		self.describe['command'] = self.describeMovie
+		self.describe.grid(row=3, column=4, padx=2, pady=2)
+
+		#	Create Backward button
+		self.backward = Button(self.master, width=20, padx=3, pady=3)
+		self.backward['text'] = '<<<'
+		self.backward['command'] = self.backwardMovie
+		self.backward.grid(row=2, column=1, padx=2, pady=2)
+
+		#	Create Forward button
+		self.forward = Button(self.master, width=20, padx=3, pady=3)
+		self.forward['text'] = '>>>'
+		self.forward['command'] = self.forwardMovie
+		self.forward.grid(row=2, column=4, padx=2, pady=2)
+
+
+		# Create a label to display the video length
+		self.labellen = Label(self.master, height=1, width= 6, borderwidth= 3, relief='groove')
+		self.labellen.grid(row=1, column=4, ipadx=0) 
+		self.labellen.configure(text='...')
+
+		# Create a label to display the remaining time
+		self.label_remain = Label(self.master, height=1, width= 6, borderwidth= 3, relief='groove')
+		self.label_remain.grid(row=1, column=1, ipadx=0) 
+		self.label_remain.configure(text='...')
 
 		# Create a label to display the movie
-		self.label = Label(self.master, height=25, width= 60)
-		self.label.grid(row=0, column=0, columnspan=4, sticky=W+E+N+S, padx=5, pady=5) 
+		self.label = Label(self.master, height=19, width= 30)
+		self.label.grid(row=0, column=1, columnspan=4, sticky=W+E+N+S, padx=5, pady=5) 
 
-	
+		#Create a progress bar
+		self.progress = Progressbar(self.master, orient= HORIZONTAL, length= 310, mode= 'determinate')
+		self.progress.grid(row=1, column=2, columnspan= 2)
 	def setupMovie(self):
 		"""Setup button handler."""
 		if self.state == self.INIT:
+			self.fileName = self.clicked.get()
 			self.sendRtspRequest(self.SETUP)
 	
 	def exitClient(self):
@@ -103,28 +141,68 @@ class Client:
 	
 	def playMovie(self):
 		"""Play button handler."""
-		if self.state == self.READY:
-			self.sendRtspRequest(self.PLAY)
+		if self.state == self.INIT:
+			self.fileName = self.clicked.get()
+			self.sendRtspRequest(self.SETUP)
+			self.state = self.READY
+			self.done = threading.Event()
+		if self.setupflag == 0:
+			while True:
+				if self.state == self.READY and self.done.isSet():
+					self.sendRtspRequest(self.PLAY)
+					self.setupflag = 1
+					break
+		else:
+			if self.state == self.READY:
+				self.sendRtspRequest(self.PLAY)
+		#self.sendRtspRequest(self.PLAY)
+		
+	def describeMovie(self):
+		if self.state == self.READY or self.state == self.PLAYING:
+			self.sendRtspRequest(self.DESCRIBE)
 
 	def listenRtp(self):		
 		"""Listen for RTP packets."""
 		while True:
 			try:
+			
 				data, addr = self.rtp_soc.recvfrom(20480)
-				if data:
-					packet = RtpPacket()
-					packet.decode(data)
-					if packet.seqNum() != self.frameNbr + 1:
-						self.LOSS_NUM += packet.seqNum() - (self.frameNbr + 1)
-				
-					if packet.seqNum() >= 1:
-						payload = packet.getPayload()
-						self.updateMovie(self.writeFrame(payload))
-						self.frameNbr = packet.seqNum()
-						self.TOTAL_DATA += len(payload)
+
+				packet = RtpPacket()
+				packet.decode(data)
+				#Dieu kien xac dinh su mat goi
+				'''
+				if self.backward_event.isSet():
+					print(f'just check:  {self.frameNbr - self.pass_frame} {self.frameNbr} {self.pass_frame}  {packet.seqNum()}')
+				elif self.forward_event.isSet():
+					print(f'just check:  {self.frameNbr + self.pass_frame} {self.frameNbr} {self.pass_frame}  {packet.seqNum()}')
+				'''
+				if self.forward_event.isSet() and self.frameNbr + self.pass_frame < packet.seqNum():
+					self.LOSS_NUM += packet.seqNum() - (self.frameNbr + self.pass_frame)
+				elif self.backward_event.isSet() and self.frameNbr - self.pass_frame < packet.seqNum():
+					self.LOSS_NUM += packet.seqNum() - (self.frameNbr - self.pass_frame)
+				elif packet.seqNum() != self.frameNbr + 1 and self.requestSent == self.PLAY:
+					self.LOSS_NUM += packet.seqNum() - (self.frameNbr + 1)		
 						
-
-
+					
+				if packet.seqNum() >= 1 and packet.seqNum() <= self.total_frame:
+					payload = packet.getPayload()
+					self.updateMovie(self.writeFrame(payload))
+					self.frameNbr = packet.seqNum()
+					self.TOTAL_DATA += len(payload)
+					self.frame_count += 1
+					self.backward_event.clear()
+					self.forward_event.clear()
+					self.label_remain.configure(text=f'{self.len - round((self.len / self.total_frame) * self.frameNbr)}')
+					self.progress['value'] = (self.frameNbr / self.total_frame) * 100
+				#Code uoc tinh do dai video
+				#print(packet.timestamp())
+				if self.frameNbr >= self.total_frame:
+					if self.START_TIME:
+						self.END_TIME = time()
+						self.TOTAL_TIME += self.END_TIME - self.START_TIME
+						self.START_TIME = 0
+						break
 			except:	
 				if self.event.isSet() and self.teardownAcked == 1:
 					self.event.clear()
@@ -133,14 +211,6 @@ class Client:
 				elif self.event.isSet() and self.teardownAcked == 0:
 					self.event.clear()
 					break
-				else:
-					if self.START_TIME:
-						self.END_TIME = time()
-						self.TOTAL_TIME += self.END_TIME - self.START_TIME
-						self.START_TIME = 0
-						break
-					else:
-						break
 				
 			
 	
@@ -169,7 +239,7 @@ class Client:
 		self.rtsp_soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		addr = (self.serverAddr, self.serverPort)
 		self.rtsp_soc.connect(addr)
-		#self.sendRtspRequest(self.SETUP)
+		self.sendRtspRequest(self.CHOOSE)
 		
 
 	
@@ -178,14 +248,20 @@ class Client:
 		#-------------
 		# TO COMPLETE
 		#-------------
-		if requestCode == self.SETUP:
+		if requestCode == self.CHOOSE:
+			self.rtspSeq += 1
+			request = 'CHOOSE VIDEO RTSP/1.0\n'
+			request += f'CSeq: {self.rtspSeq}'
+			self.requestSent = self.CHOOSE
+			threading.Thread(target=self.recvRtspReply).start()
+		elif requestCode == self.SETUP:
 			self.rtspSeq += 1
 			request = f'SETUP {self.fileName} RTSP/1.0\n' #version giong nhu trong vi du
 			request += f'CSeq: {self.rtspSeq}\n'
 			request += f'Transport: RTP/UDP; client_port= {self.rtpPort}'
 			self.requestSent = self.SETUP
 			#thread cho phan hoi tu server
-			threading.Thread(target=self.recvRtspReply).start()
+			#threading.Thread(target=self.recvRtspReply).start()
 		elif requestCode == self.TEARDOWN:
 			self.rtspSeq += 1
 			request = f'TEARDOWN {self.fileName} RTSP/1.0\n'
@@ -204,6 +280,23 @@ class Client:
 			request += f'CSeq: {self.rtspSeq}\n'
 			request += f'Session: {self.sessionId}'
 			self.requestSent = self.PLAY
+		elif requestCode == self.DESCRIBE:
+			self.rtspSeq += 1
+			request = f'DESCRIBE {self.fileName} RTSP/1.0\n'
+			request += f'CSeq: {self.rtspSeq}\n'
+			self.requestSent = self.DESCRIBE
+		elif requestCode == self.FORWARD:
+			self.rtspSeq += 1
+			request = f'FORWARD {self.fileName} RTSP/1.0\n'
+			request += f'CSeq: {self.rtspSeq}\n'
+			request += f'Session: {self.sessionId}'
+			self.requestSent = self.FORWARD
+		elif requestCode == self.BACKWARD:
+			self.rtspSeq += 1
+			request = f'BACKWARD {self.fileName} RTSP/1.0\n'
+			request += f'CSeq: {self.rtspSeq}\n'
+			request += f'Session: {self.sessionId}'
+			self.requestSent = self.BACKWARD
 		self.rtsp_soc.send(request.encode('utf-8'))
 		
 	
@@ -222,49 +315,74 @@ class Client:
 		"""Parse the RTSP reply from the server."""
 		#des = data
 		data = data.split('\n')
-		print(data)
-		
-		rep_code = data[0].split(' ')[1]
-		cseq = int(data[1].split(' ')[1])
-		id = int(data[2].split(' ')[1])
-			
-		if cseq == self.rtspSeq:
+		#print(data)
+		if len(data) != 0:
+			rep_code = data[0].split(' ')[1]
+			cseq = int(data[1].split(' ')[1])
+			if len(data) == 5:
+						self.len = int(data[3].split(' ')[1])
+						self.total_frame = int(data[4].split(' ')[1]) 
+						self.pass_frame = round(self.PASS_TIME / (self.len / self.total_frame))
+						self.labellen.configure(text= str(self.len))
+			elif cseq == self.rtspSeq:
+				if self.requestSent == self.CHOOSE:
+					self.state = self.INIT
+					self.video_list = data[2].split(' ')[1].split('|')
+					self.clicked = StringVar()
+					self.clicked.set(self.fileName)
+					self.drop = OptionMenu(self.master, self.clicked, *self.video_list)
+					self.drop.grid(row=0, column=0)
+				elif self.requestSent == self.SETUP:
+					id = int(data[2].split(' ')[1])
+					self.sessionId = id
+					self.state = self.READY
+					self.openRtpPort()
+					self.listencheck()
+					self.forward_event = threading.Event()
+					self.backward_event = threading.Event()
+				elif self.requestSent == self.PLAY:
+					self.state = self.PLAYING
+					self.event = threading.Event()
+					threading.Thread(target=self.listenRtp).start()
+					
+					#Phan time
+					self.START_TIME = time()
 
-			if self.requestSent == self.SETUP:
-				self.sessionId = id
-				self.openRtpPort()
-				self.state = self.READY
-			elif self.requestSent == self.PLAY and self.sessionId == id:
-				self.state = self.PLAYING
-				threading.Thread(target=self.listenRtp).start()
-				self.event = threading.Event()
-				#Phan time
-				self.START_TIME = time()
-
-			elif self.requestSent == self.PAUSE and self.sessionId == id:
-				self.state = self.READY
-				self.event.set()
-				#Phan time
-				self.END_TIME = time()
-				self.TOTAL_TIME += self.END_TIME - self.START_TIME
-				self.START_TIME = 0
-
-			elif self.requestSent == self.TEARDOWN and self.sessionId == id:
-				self.state = self.SETUP
-				self.event.set()
-				self.teardownAcked = 1
-
-				if self.START_TIME != 0:
+				elif self.requestSent == self.PAUSE:
+					self.state = self.READY
+					self.event.set()
+					#Phan time
 					self.END_TIME = time()
 					self.TOTAL_TIME += self.END_TIME - self.START_TIME
-					
-				loss_rate = (self.LOSS_NUM / self.frameNbr) * 100
-				data_rate = self.TOTAL_DATA / self.TOTAL_TIME
-				print('Stats value: ')
-				print('LOSS RATE: {:.2f}%'.format(loss_rate))
-				print('DATA RATE: {:.2f} bps'.format(data_rate))
-				print(f'Video duration: {self.TOTAL_TIME}')
+					self.START_TIME = 0
 
+				elif self.requestSent == self.TEARDOWN :
+					self.state = self.SETUP
+					self.event.set()
+					self.teardownAcked = 1
+
+					if self.START_TIME != 0:
+						self.END_TIME = time()
+						self.TOTAL_TIME += self.END_TIME - self.START_TIME
+					
+					loss_rate = (self.LOSS_NUM / self.frame_count) * 100
+					data_rate = self.TOTAL_DATA / self.TOTAL_TIME
+					print('Stats value: ')
+					print('LOSS RATE: {:.2f}%'.format(loss_rate))
+					print('DATA RATE: {:.2f} bps'.format(data_rate))
+				elif self.requestSent == self.DESCRIBE :
+					des = data[3:]
+					file = open('des.sdp', 'a')
+					for line in des:
+						print(line)
+					des = data[6:]
+					for line in des:
+						file.write(line+'\n')
+					file.close()
+				elif self.requestSent == self.FORWARD:
+					self.forward_event.set()
+				elif self.requestSent == self.BACKWARD:
+					self.backward_event.set()
 
 					
 
@@ -291,3 +409,29 @@ class Client:
 			self.exitClient()
 		else: 
 			self.playMovie()
+
+	def listencheck(self):
+		'''Receive the first 3 packet for testing'''
+		while True:
+			try:
+				data, addr = self.rtp_soc.recvfrom(20480)
+		
+				packet = RtpPacket()
+				packet.decode(data)
+				if packet.seqNum() == 3:
+					break
+			except:	
+				print('error')
+				break
+		self.done.set()
+		
+	
+	def backwardMovie(self):
+		'''Rewind the video'''
+		if (self.state == self.PLAYING or self.state == self.READY) and (self.frameNbr - self.pass_frame >= 1):
+			self.sendRtspRequest(self.BACKWARD)
+
+	def forwardMovie(self):
+		'''Fast-forward the video'''
+		if (self.state == self.PLAYING or self.state == self.READY) and (self.frameNbr + self.pass_frame <= self.total_frame):
+			self.sendRtspRequest(self.FORWARD)
