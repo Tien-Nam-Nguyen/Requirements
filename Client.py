@@ -6,7 +6,7 @@ from time import time
 from tkinter import *
 import tkinter.messagebox
 from tkinter.ttk import Progressbar
-from turtle import left
+from turtle import left, width
 from typing_extensions import Self
 from PIL import Image, ImageTk
 import socket, threading, sys, traceback, os
@@ -55,17 +55,10 @@ class Client:
 		self.teardownAcked = 0
 		self.connectToServer()
 		self.frameNbr = 0
-		self.frame_count = 0
 		self.setupflag = 0
 	# THIS GUI IS JUST FOR REFERENCE ONLY, STUDENTS HAVE TO CREATE THEIR OWN GUI 	
 	def createWidgets(self):
 		"""Build GUI."""
-		# Create Setup button
-		self.setup = Button(self.master, width=20, padx=3, pady=3)
-		self.setup["text"] = "Setup"
-		self.setup["command"] = self.setupMovie
-		self.setup.grid(row=3, column=2, padx=2, pady=2)
-		
 		# Create Play button		
 		self.start = Button(self.master, width=20, padx=3, pady=3)
 		self.start["text"] = "Play"
@@ -82,13 +75,13 @@ class Client:
 		self.teardown = Button(self.master, width=20, padx=3, pady=3)
 		self.teardown["text"] = "Teardown"
 		self.teardown["command"] =  self.exitClient
-		self.teardown.grid(row=3, column=3, padx=2, pady=2)
+		self.teardown.grid(row=3, column=2, padx=2, pady=2)
 		
 		#	Create Describe button
 		self.describe = Button(self.master, width=20, padx=3, pady=3)
 		self.describe['text'] = 'Describe'
 		self.describe['command'] = self.describeMovie
-		self.describe.grid(row=3, column=4, padx=2, pady=2)
+		self.describe.grid(row=3, column=3, padx=2, pady=2)
 
 		#	Create Backward button
 		self.backward = Button(self.master, width=20, padx=3, pady=3)
@@ -120,11 +113,6 @@ class Client:
 		#Create a progress bar
 		self.progress = Progressbar(self.master, orient= HORIZONTAL, length= 310, mode= 'determinate')
 		self.progress.grid(row=1, column=2, columnspan= 2)
-	def setupMovie(self):
-		"""Setup button handler."""
-		if self.state == self.INIT:
-			self.fileName = self.clicked.get()
-			self.sendRtspRequest(self.SETUP)
 	
 	def exitClient(self):
 		"""Teardown button handler."""
@@ -171,17 +159,12 @@ class Client:
 				packet = RtpPacket()
 				packet.decode(data)
 				#Dieu kien xac dinh su mat goi
-				'''
-				if self.backward_event.isSet():
-					print(f'just check:  {self.frameNbr - self.pass_frame} {self.frameNbr} {self.pass_frame}  {packet.seqNum()}')
-				elif self.forward_event.isSet():
-					print(f'just check:  {self.frameNbr + self.pass_frame} {self.frameNbr} {self.pass_frame}  {packet.seqNum()}')
-				'''
+				
 				if self.forward_event.isSet() and self.frameNbr + self.pass_frame < packet.seqNum():
 					self.LOSS_NUM += packet.seqNum() - (self.frameNbr + self.pass_frame)
 				elif self.backward_event.isSet() and self.frameNbr - self.pass_frame < packet.seqNum():
 					self.LOSS_NUM += packet.seqNum() - (self.frameNbr - self.pass_frame)
-				elif packet.seqNum() != self.frameNbr + 1 and self.requestSent == self.PLAY:
+				elif packet.seqNum() != self.frameNbr + 1 and self.requestSent == self.PLAY and (not self.forward_event and not self.backward_event):
 					self.LOSS_NUM += packet.seqNum() - (self.frameNbr + 1)		
 						
 					
@@ -190,7 +173,6 @@ class Client:
 					self.updateMovie(self.writeFrame(payload))
 					self.frameNbr = packet.seqNum()
 					self.TOTAL_DATA += len(payload)
-					self.frame_count += 1
 					self.backward_event.clear()
 					self.forward_event.clear()
 					self.label_remain.configure(text=f'{self.len - round((self.len / self.total_frame) * self.frameNbr)}')
@@ -331,7 +313,7 @@ class Client:
 					self.clicked = StringVar()
 					self.clicked.set(self.fileName)
 					self.drop = OptionMenu(self.master, self.clicked, *self.video_list)
-					self.drop.grid(row=0, column=0)
+					self.drop.grid(row=3, column=1)
 				elif self.requestSent == self.SETUP:
 					id = int(data[2].split(' ')[1])
 					self.sessionId = id
@@ -365,7 +347,7 @@ class Client:
 						self.END_TIME = time()
 						self.TOTAL_TIME += self.END_TIME - self.START_TIME
 					
-					loss_rate = (self.LOSS_NUM / self.frame_count) * 100
+					loss_rate = (self.LOSS_NUM / self.frameNbr) * 100
 					data_rate = self.TOTAL_DATA / self.TOTAL_TIME
 					print('Stats value: ')
 					print('LOSS RATE: {:.2f}%'.format(loss_rate))
@@ -428,10 +410,10 @@ class Client:
 	
 	def backwardMovie(self):
 		'''Rewind the video'''
-		if (self.state == self.PLAYING or self.state == self.READY) and (self.frameNbr - self.pass_frame >= 1):
+		if (self.state == self.PLAYING ) and (self.frameNbr - self.pass_frame >= 1):
 			self.sendRtspRequest(self.BACKWARD)
 
 	def forwardMovie(self):
 		'''Fast-forward the video'''
-		if (self.state == self.PLAYING or self.state == self.READY) and (self.frameNbr + self.pass_frame <= self.total_frame):
+		if (self.state == self.PLAYING ) and (self.frameNbr + self.pass_frame <= self.total_frame):
 			self.sendRtspRequest(self.FORWARD)
